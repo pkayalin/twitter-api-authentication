@@ -1,14 +1,22 @@
 from flask_restplus import Namespace, Resource, fields
 from flask import abort
-from app.db import tweet_repository
 from app.models import Tweet
+from app import db
 
 api = Namespace('tweets')
+
+class JsonUser(fields.Raw):
+    def format(self, value):
+        return {
+            'username': value.username,
+            'email': value.email
+        }
 
 json_tweet = api.model('Tweet', {
     'id': fields.Integer,
     'text': fields.String,
-    'created_at': fields.DateTime
+    'created_at': fields.DateTime,
+    'user': JsonUser
 })
 
 json_new_tweet = api.model('New tweet', {
@@ -21,7 +29,7 @@ json_new_tweet = api.model('New tweet', {
 class TweetResource(Resource):
     @api.marshal_with(json_tweet)
     def get(self, id):
-        tweet = tweet_repository.get(id)
+        tweet = db.session.query(Tweet).get(id)
         if tweet is None:
             api.abort(404, "Tweet {} doesn't exist".format(id))
         else:
@@ -30,7 +38,7 @@ class TweetResource(Resource):
     @api.marshal_with(json_tweet, code=200)
     @api.expect(json_new_tweet, validate=True)
     def patch(self, id):
-        tweet = tweet_repository.get(id)
+        tweet = db.session.query(Tweet).get(id)
         if tweet is None:
             api.abort(404, "Tweet {} doesn't exist".format(id))
         else:
@@ -38,23 +46,30 @@ class TweetResource(Resource):
             return tweet
 
     def delete(self, id):
-        tweet = tweet_repository.get(id)
+        tweet = db.session.query(Tweet).get(id)
         if tweet is None:
             api.abort(404, "Tweet {} doesn't exist".format(id))
         else:
-            tweet_repository.remove(id)
+            db.session.delete(tweet)
+            db.session.commit()
             return None
 
 @api.route('')
-@api.response(422, 'Invalid tweet')
 class TweetsResource(Resource):
     @api.marshal_with(json_tweet, code=201)
     @api.expect(json_new_tweet, validate=True)
+    @api.response(422, 'Invalid tweet')
     def post(self):
         text = api.payload["text"]
         if len(text) > 0:
-            tweet = Tweet(text)
-            tweet_repository.add(tweet)
+            tweet = Tweet(text=text)
+            db.session.add(tweet)
+            db.session.commit()
             return tweet, 201
         else:
             return abort(422, "Tweet text can't be empty")
+
+    @api.marshal_list_with(json_tweet)
+    def get(self):
+        tweets = db.session.query(Tweet).all()
+        return tweets
